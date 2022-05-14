@@ -1,8 +1,10 @@
 # KARA
-####Customizable Capable Neural (Transformer based) Chatbots
+
+#### Customizable Capable Neural (Transformer based) Chatbots
 
 Features: Vision, Memories ( Disabled by default, two different methods will be implemented), Personalities and animated characters!
-#####Includes an example discord bot interface, join our discord to play around with it!
+
+##### Includes an example discord bot interface, join our discord to play around with it!
 
 Also please join the discord if you need help setting things up: https://discord.gg/vK4RjZWbkU
 
@@ -17,7 +19,7 @@ API keys and urls are set in environmental variables.
 It even generates a little animated avatar as a GIF!
 
 
-####Kara's structure:
+#### Kara's structure:
     Core class: Easy to use interface for a transformer endpoint
         load_gpt3, load_gpt_forefront, load_gptj, load_gptj_new, load_gptneox
     
@@ -34,4 +36,4 @@ It even generates a little animated avatar as a GIF!
     
     VITserver.ipynb: Server for load_VITCloud
 
-##A lot more will be written here about the theory and principles!!
+## A lot more will be written here about the theory and principles!!
