@@ -10,6 +10,10 @@ nlp = stanza.Pipeline('en', processors='tokenize,ner')
 c = 2
 # Number of cycles to prevent Kara from quickly switching decisions
 THRESHOLD = 2
+
+# sample emotions every x ticks
+EMOTION_SAMPLING = 4
+
 # Token max
 MAX_TOKENS = 2048
 LETTERS_PER_TOKEN = 3
@@ -66,6 +70,7 @@ class Kara:
         self.flavour_prompt = self.flavour.generate()
         self.memories = memories
         self.decision_counter = 0
+        self.clock = 0
 
     def show(self, who, image, img_type):
         self.chat_log += who + " shows you an image of " + self.vidi.describe(image, img_type) + "\n"
@@ -151,29 +156,22 @@ class Kara:
 
     def tick(self, force=False):
         # Kara's internal clock.
+        if self.clock % 10 == 0:
+            # Only determine emotions every 10 cycles, to save on resources
+            result = self.flavour.cons.emotions_shown(
+                self.chat_log[len(self.chat_log) // c:], self.flavour, self.name)
+
+            if result is not None:
+                self.flavour.choice, self.flavour.mood = result
+            # Update the verbose prompt describing their behaviour
+            self.update_flavour()
+        self.clock += 1
         if self.decision_counter == 0 or force:
             # test this first so Kara doesnt have to use the transformer to decide
             if force:
-                # Only determine emotions when Kara is speaking, to save on resources
-                result = self.flavour.cons.emotions_shown(
-                    self.chat_log[len(self.chat_log) // c:], self.flavour, self.name)
-
-                if result is not None:
-                    self.flavour.choice, self.flavour.mood = result
-                # Update the verbose prompt describing their behaviour
-                self.update_flavour()
-                # Make Kara talk
                 return self.query()
             # If we have reached 0, it means kara must make a decision again
             elif self.core.decide(self.chat_log[len(self.chat_log) // c:], self.name) or force:
-                # Only determine emotions when Kara is speaking, to save on resources
-                result = self.flavour.cons.emotions_shown(
-                    self.chat_log[len(self.chat_log) // c:], self.flavour, self.name)
-
-                if result is not None:
-                    self.flavour.choice, self.flavour.mood = result
-                # Update the verbose prompt describing their behaviour
-                self.update_flavour()
                 # Make Kara talk
                 return self.query()
             else:
