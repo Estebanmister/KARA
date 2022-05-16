@@ -1,18 +1,13 @@
 #from load_vidi import *
 from FLAVOUR import *
 from Syl import *
-import stanza
-# uncomment this at the first run
-#stanza.download('en')
-nlp = stanza.Pipeline('en', processors='tokenize,ner')
+import memory_gen
 
-# Context fraction used for emotion detection and internal decisions
-c = 2
 # Number of cycles to prevent Kara from quickly switching decisions
-THRESHOLD = 2
+THRESHOLD = 0
 
 # sample emotions every x ticks
-EMOTION_SAMPLING = 4
+EMOTION_SAMPLING = 50
 
 # Token max
 MAX_TOKENS = 2048
@@ -31,8 +26,8 @@ class Core:
 
 
 class Kara:
-    def __init__(self, chat_log, ai_name, core, vidi, flavour_core=None, personality=('kind', 'loving'),
-                 initial_mood=('helpful',), memories = False, SALIERI = False):
+    def __init__(self, chat_log, ai_name, core, vidi, flavour_core=None, personality=('kind', 'loving', 'a robot'),
+                 initial_mood=('helpful',), SALIERI = False):
         """
         Create a Chatbot
         parameters:
@@ -65,10 +60,15 @@ class Kara:
             self.sylhelpful = SylCharacter(ai_name.lower() + "_helpful")
             self.sylangry = SylCharacter(ai_name.lower() + "_angry")
             self.sylplayful = SylCharacter(ai_name.lower() + "_playful")
-
+        temp = chat_log
+        if len(chat_log) > (MAX_TOKENS * LETTERS_PER_TOKEN) + 1000:
+            temp = chat_log[len(chat_log)-(MAX_TOKENS * LETTERS_PER_TOKEN):]
+        self.memories = memory_gen.memory_gen(temp)
+        print(self.memories)
         self.chat_log = chat_log
         self.flavour_prompt = self.flavour.generate()
-        self.memories = memories
+        print(self.flavour_prompt)
+        #self.memories = memories
         self.decision_counter = 0
         self.clock = 0
 
@@ -84,22 +84,11 @@ class Kara:
     def update_log(self, message, who):
         self.chat_log += who + " says : " + message + '\n'
 
-    def memory_lookup(self, context_list, to_search):
-        """
-        Use Stanza to find entities within to_search, and search those entities on the context
-        parameters:
-            context_list: list of strings
-            to_search: string
-        """
-        doc = nlp(to_search)
-        memories = []
-        entities = doc.entities
-        # For every entity, check if it has been mentioned before, and attach the context related to that entity
-        for entity in entities:
-            for b, line in enumerate(context_list):
-                if entity.text.lower() in line.lower().split(":"):
-                    memories.append([context_list[b-1], context_list[b], context_list[b+1]])
-        return memories
+    def memory_generation(self, context):
+        temp = context
+        if len(context) > (MAX_TOKENS * LETTERS_PER_TOKEN) + 1000:
+            temp = context[len(context) - (MAX_TOKENS * LETTERS_PER_TOKEN):]
+        self.memories = memory_gen.memory_gen(temp)
 
     def query(self):
         """
@@ -112,29 +101,26 @@ class Kara:
         # take out the last last to check memories
         previous = splut.pop()
         joined_memories = []
-        if self.memories:
-            # perform the memory look up, according to the entities found by Stanza
-            memories = self.memory_lookup(splut, ':'.join(previous.split(':')[1:]))
-            # only take the last 3 memories, the chronological order of the conversation is more important.
-            memories = memories[len(memories)-3:]
-            joined_memories = []
-            for memory in memories:
-                joined_memories.append("\n".join(memory))
 
         # Cut the chat log to fit the 2048 * 3 character limit
         char_max = MAX_TOKENS * LETTERS_PER_TOKEN
-        memories_length = len('\n'.join(joined_memories))
-        chars_left = char_max-(memories_length+len(self.flavour_prompt)+len(previous)+len(self.name+" says :") +
+        chars_left = char_max-(len(self.flavour_prompt)+len(self.memories)+len(previous)+len(self.name+" says :") +
                                10 + (100*LETTERS_PER_TOKEN))
         from_log = len('\n'.join(splut))-chars_left
         # Combine all the strings into a singular prompt
-        chat_log = self.flavour_prompt + '\n\n' + '\n'.join(joined_memories)\
+        chat_log = self.flavour_prompt + '\n\n' + self.memories\
                    + "\n\n" + '\n'.join(splut)[from_log:] + '\n' + previous + "\n" + self.name + " says :"
         # print(len(chat_log))
         # print(char_max)
 
         # Generate the bot's message
-        output = self.core.infer(chat_log)
+        # Sometimes the core may forget to remove some of the prompt, just in case we separate the output by newlines
+        # and pick the last one (Or if ending in a trailing newline, the previous one to that)
+        output = self.core.infer(chat_log).split('\n')
+        if output[-1] == "":
+            output = output[-2]
+        else:
+            output = output[-1]
         print("Said " + output)
         self.chat_log += self.name + " says : " + output + '\n'
 
@@ -149,29 +135,29 @@ class Kara:
                 self.sylangry.save(self.sylangry.use_parser(self.name + " says : " + output))
             elif self.flavour.choice == "playful":
                 self.sylplayful.save(self.sylplayful.use_parser(self.name + " says : " + output))
-        # yes this does happen
+        # yes this does happen, these sort of errors are invitable when working with non zero temps and top-p
         if output == "":
             return None
         return output
 
     def tick(self, force=False):
+        thing = self.chat_log[len(self.chat_log) - MAX_TOKENS * LETTERS_PER_TOKEN:]
         # Kara's internal clock.
-        if self.clock % 10 == 0:
-            # Only determine emotions every 10 cycles, to save on resources
-            result = self.flavour.cons.emotions_shown(
-                self.chat_log[len(self.chat_log) // c:], self.flavour, self.name)
+        if self.clock % EMOTION_SAMPLING == 0:
+            # Only determine emotions every few cycles, to save on resources
+            result = self.flavour.cons.emotions_shown(thing, self.flavour, self.name)
 
             if result is not None:
                 self.flavour.choice, self.flavour.mood = result
-            # Update the verbose prompt describing their behaviour
-            self.update_flavour()
+            # update the memories as well
+            self.memory_generation(self.chat_log)
         self.clock += 1
         if self.decision_counter == 0 or force:
             # test this first so Kara doesnt have to use the transformer to decide
             if force:
                 return self.query()
             # If we have reached 0, it means kara must make a decision again
-            elif self.core.decide(self.chat_log[len(self.chat_log) // c:], self.name) or force:
+            elif self.core.decide(thing, self.name) or force:
                 # Make Kara talk
                 return self.query()
             else:
@@ -189,11 +175,17 @@ if __name__ == "__main__":
     ff = open("chat_log.txt")
     cht = ff.read()
     ff.close()
-    kara = Kara(cht, "Kara", core='forefront')
+    from load_gpt_forefront import *
+    from load_OFA import *
+    # You need a forefront account for this, DM me if you have some other API that you want included
+    # (or better yet, make a push request)
+    gpt = FFNEOX()
+    ofa = OFACore()
+    kara = Kara(cht, "Kara", gpt, ofa)
     name = input("Your name?")
     while True:
         kara.update_log(input("Say something: "), name)
-        output = kara.tick()
+        output = kara.tick(force=True)
         if output is None:
             print("Kara has nothing to say yet")
         else:

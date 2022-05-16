@@ -5,9 +5,12 @@ import requests
 import base64
 from io import BytesIO
 from VIDI import VisualCore
+import os
 
 # If you are building a bigger application, you might want to replace this with a paid api
 hugging_face_api = 'https://hf.space/embed/OFA-Sys/OFA-Image_Caption/+/api/predict/'
+
+headers = {"Authorization": os.getenv("HUG_API")}
 
 
 class OFACore(VisualCore):
@@ -23,7 +26,7 @@ class OFACore(VisualCore):
         my_string = base64.b64encode(b)
         my_string = my_string.decode('utf-8')
 
-        r = requests.post(url=hugging_face_api, json={"data":
+        r = requests.post(url=hugging_face_api, headers=headers,json={"data":
                   ["data:image/jpeg;base64,"+my_string]})
         return r.json()['data'][0]
 

@@ -3,7 +3,8 @@ from discord.ext import tasks
 from PIL import Image
 import requests
 from KARA import *
-from load_gpt_forefront import *
+#from load_gpt_forefront import *
+from load_customendpoint import *
 from load_OFA import *
 import os
 
@@ -12,25 +13,34 @@ bot = discord.Client()
 with open("example_chatlog.txt", "r") as f:
     initial_chatlog = f.read()
 
+# the bot will only listen to commands by this username
+OWNER = "Your-username-here"
+
 ofa = OFACore()
-gpt = FFNEOX()
+gpt = CUSTMGPT()
 kara = Kara(initial_chatlog, "Kara", gpt, ofa)
 new_response = None
 
 first_message = True
 last_channel = None
+time_left = 3
+
 
 @tasks.loop(hours=1)
 async def backup():
+    print("Backed up")
     with open("backup.txt", "w") as f:
         f.write(kara.chat_log)
 
+
 @tasks.loop(seconds=30)
 async def tickClock():
-    global new_response, first_message
+    global new_response, first_message, time_left
     if not first_message:
+        time_left -= 1
         print("tick")
         new_response = kara.tick()
+        print(new_response)
         if new_response is not None:
             await last_channel.send(new_response)
             new_response = None
@@ -38,15 +48,40 @@ async def tickClock():
             await bot.change_presence(status=discord.Status.idle)
         else:
             await bot.change_presence(status=discord.Status.online)
+        if time_left == 0:
+            print("Clock stopped")
+            kara.chat_log += "\n"
+            tickClock.cancel()
+
 
 @bot.event
 async def on_ready():
     print("Boot")
+    for guild in bot.guilds:
+        print(guild.name)
+        for channel in guild.channels:
+             if type(channel) != discord.CategoryChannel:
+                try:
+                    await channel.send("KARA STARTED, Flavour prompt: "+kara.flavour_prompt)
+                except:
+                    print("Forbidden")
+
 
 
 @bot.event
 async def on_message(message):
-    global new_response, first_message, last_channel
+    global new_response, first_message, last_channel, time_left
+    if message.author.name == OWNER:
+        if message.content == "regenerate prompt":
+            kara.update_flavour()
+            await message.channel.send("NEW PROMPT: " + kara.flavour_prompt)
+            return
+    last_channel = message.channel
+    if time_left == 0:
+        print("Clock started again")
+        first_message = True
+        tickClock.start()
+    time_left = 3
     if message.author == bot.user:
         return
     first_message = False
@@ -83,13 +118,16 @@ async def on_message(message):
         kara.show(author, im, extension)
         print(kara.chat_log[-200])
     for usr in message.mentions:
-        content.replace(usr.mention, usr.name)
+        content = content.replace(usr.mention, usr.name)
     print(content, author)
     kara.update_log(content, author)
     if bot.user.mentioned_in(message):
         new_response = kara.tick(force=True)
-    last_channel = message.channel
-
+        if new_response is not None:
+            await message.channel.send(new_response)
+        else:
+            print("Error!")
+        new_response = None
 
 
 tickClock.start()
